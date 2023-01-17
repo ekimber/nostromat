@@ -1,0 +1,28 @@
+{
+	"name": "nostr",
+	"scripts": {
+		"ancient": "clojure -Sdeps '{:deps {com.github.liquidz/antq {:mvn/version \"RELEASE\"}}}' -m antq.core",
+		"watch": "npx shadow-cljs watch app browser-test karma-test",
+		"release": "npx shadow-cljs release app",
+		"build-report": "npx shadow-cljs run shadow.cljs.build-report app target/build-report.html",
+		"css-build": "node-sass --omit-source-map-url sass/mystyles.scss css/mystyles.css",
+		"css-watch": "npm run css-build -- --watch",
+		"start": "npm run css-watch"
+	},
+	"dependencies": {
+		"@noble/secp256k1": "^1.7.1",
+		"@scure/base": "^1.1.1",
+		"bulma": "^0.9.4",
+		"emoji-picker-element": "^1.15.0",
+		"highlight.js": "11.5.1",
+		"linkify-html": "^4.1.0",
+		"linkifyjs": "^4.1.0",
+		"minidenticons": "^2.0.0",
+		"node-sass": "^8.0.0",
+		"react": "17.0.2",
+		"react-dom": "17.0.2"
+	},
+	"devDependencies": {
+		"shadow-cljs": "2.19.0"
+	}
+}

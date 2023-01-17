@@ -1,0 +1,17 @@
+@charset "utf-8";
+$size-5: 1.1rem;
+$size-6: 0.8rem;
+$size-7: 0.5rem;
+$family-sans-serif: "Source Sans Pro", "Noto Color Emoji", sans-serif;
+@import "../node_modules/bulma/bulma.sass";
+
+#slide-down {
+    position: absolute;
+    top: -100px;
+    transition: 1s;
+}
+ul {
+    list-style-type: none !important;
+}
+// @import "@animxyz/core";
+// @include xyz-all;
