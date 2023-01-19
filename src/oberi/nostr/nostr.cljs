@@ -5,11 +5,11 @@
             ["linkifyjs" :as link]
             ["@scure/base" :as b]
             ["@noble/secp256k1" :as secp]
+            ["nanoid/generate" :as r]
             [cljs.core.async.interop :refer-macros [<p!]]
             [cljs.core.async :as async :refer [<!]]
             [cljs.pprint :refer [pprint]])
   (:require-macros [cljs.core.async.macros :refer [go]]))
-
 
 ;; Filters object
 ;; {
@@ -63,7 +63,8 @@
 (defrecord NostrEvent [pubkey created_at kind tags content]
   EventMessage
   (id [m] (go (or (:id m)
-                  (->> (wire m)
+                  (->> #js[0 pubkey created_at kind (clj->js (or tags [])) (or content "")]
+                       (.stringify js/JSON)
                        (.encode encoder)                   
                        (.sha256 secp/utils)
                        <p!
@@ -73,17 +74,13 @@
                       (assoc hashed :sig (<! (sig hashed key))))))
   (verify [m] (go (<p! (.verify secp/schnorr (:sig m) (:id m) (:pubkey m)))))
   (->js [m] (go #js{ "id" (<! (id m))
-                "pubkey" (:pubkey m)
-                "created_at" (:created_at m)
-                "kind" (:kind m)
-                "tags" (clj->js (:tags m))
-                "content" (:content m)
-                ;"sig" (:sig m)
-                })))
-
-(defrecord SignedEvent [id pubkey created_at kind tags content sig]
-  Message
-  (wire [m] (clj->js m)))
+                    "pubkey" (:pubkey m)
+                    "created_at" (:created_at m)
+                    "kind" (:kind m)
+                    "tags" (clj->js (:tags m))
+                    "content" (:content m)
+                    "sig" (:sig m)
+                    })))
 
 (extend-protocol Message
   NostrEvent
@@ -103,13 +100,19 @@
   (if (or (nil? s) (> 9 len))
     s
     (let [end-size (/ (- len 3) 2)
-        start (subs s 0 end-size)
-        end (subs s (- len end-size) len)]
+          start (subs s 0 end-size)
+          end (subs s (- (count s) end-size) (count s))]
       (str start "…" end))))
 
 (defn encode-hex [prefix hex]
   (.encode b/bech32 prefix (->> (.hexToBytes secp/utils hex)
                                 (.toWords b/bech32)) 1500))
+(defn decode-b32 [b32]
+  (->> (.decode b/bech32 b32)
+      .-words
+      (.fromWords b/bech32)
+      (.bytesToHex secp/utils)))
+  
 
 (defn ^RequestMessage author-req-msg [subs-id pubkey-list]
   ["REQ" subs-id {:authors pubkey-list
@@ -200,7 +203,7 @@
       []))
 
 (defn unparse-relay-list [relays]
-  (.stringify js/JSON (clj->js relays)))
+  (if-not relays "" (.stringify js/JSON (clj->js relays))))
  
 (defn relay-list-from-settings [settings-r]
   (reduce #(assoc %1 (:relay-url %2) (select-keys %2 [:read :write])) {} settings-r))
@@ -242,3 +245,23 @@
 
 (defn send-to-relay-fx [query relays]
   (mapv #(vector :send-to-relay [% (wire query)]) relays))
+
+(defn generate-key []
+  (r "1234567890abcdef" 64))
+
+(defn public-key [private-key]
+  (.bytesToHex secp/utils (.getPublicKey secp/schnorr private-key)))
+
+(defn contact-feed-req [pubkey contact-list]
+  (->QueryRequest (->Subscription (str "cntfd" pubkey) true)
+                        {:authors (conj (mapv :pubkey contact-list) pubkey)
+                         :kinds [1 2 6 7] :limit 150}))
+
+(defn contact-list-req [pubkey contact-list]
+  (->QueryRequest (->Subscription (str "cnt" pubkey) true)
+                        {:authors (conj (mapv :pubkey contact-list) pubkey)
+                         :kinds [0 3] :limit (max 5 (inc (count contact-list)))}))
+
+(defn private-msg-req [pubkey]
+  (->QueryRequest (->Subscription (str "prv" pubkey) true)
+                        {:kinds [4] :#p [pubkey] :limit 100}))

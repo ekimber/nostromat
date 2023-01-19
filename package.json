@@ -11,6 +11,7 @@
 	},
 	"dependencies": {
 		"@noble/secp256k1": "^1.7.1",
+		"@node-lightning/invoice": "^0.28.0",
 		"@scure/base": "^1.1.1",
 		"bulma": "^0.9.4",
 		"emoji-picker-element": "^1.15.0",
@@ -18,9 +19,11 @@
 		"linkify-html": "^4.1.0",
 		"linkifyjs": "^4.1.0",
 		"minidenticons": "^2.0.0",
+		"nanoid": "^2.1.9",
 		"node-sass": "^8.0.0",
 		"react": "17.0.2",
-		"react-dom": "17.0.2"
+		"react-dom": "17.0.2",
+		"react-transition-group": "^4.4.5"
 	},
 	"devDependencies": {
 		"shadow-cljs": "2.19.0"

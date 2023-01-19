@@ -89,3 +89,9 @@
 ;;         two-likes {:likes 2}]
 ;;     (is (= "❤ 🤙2" (n/reactions-to-text one-like)))
 ;;     (is (= "❤2" (n/reactions-to-text two-likes)))))
+
+(deftest b32-decode
+  (let [pk (n/generate-key)
+        pk-b32 (n/encode-hex "nsec" pk)]    
+    (is (= pk (n/decode-b32 pk-b32)))))    
+        

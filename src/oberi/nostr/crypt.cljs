@@ -1,4 +1,14 @@
-(ns oberi.nostr.crypt)
+(ns oberi.nostr.crypt
+  (:require ["@noble/secp256k1" :as secp]
+            ["nanoid/generate" :as r]
+            ["goog.crypt.Cbc" :as cbc]))
+
+(defn encrypt [our-priv their-pub]
+  (let [shared-point (.getSharedSecret secp our-opriv (str "02" their-pub))
+        shared-x (subs 2 64)
+    
+
+  
 ;; import crypto from 'crypto'
 ;; import * as secp from 'noble-secp256k1'
 
@@ -22,3 +32,4 @@
 ;;   tags: [['p', theirPublicKey]],
 ;;   content: encryptedMessage + '?iv=' + ivBase64
 ;; }
+

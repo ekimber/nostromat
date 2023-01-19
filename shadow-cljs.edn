@@ -29,7 +29,8 @@
           {re-frame.trace.trace-enabled? true
            day8.re-frame.tracing.trace-enabled? true}
           :output-feature-set :es2018}}
-   :release {:build-options
+   :release {:compiler-options {:output-feature-set :es2018}
+             :build-options
              {:ns-aliases
               {day8.re-frame.tracing day8.re-frame.tracing-stubs}}}}
   :browser-test

@@ -1,6 +1,8 @@
 (ns oberi.nostr.views
   (:require [oberi.nostr.rf :as rf :refer [<sub >evt]]
             [oberi.nostr.relay :as r]
+            [oberi.nostr.nostr :as n]
+            [oberi.nostr.subs]
             [clojure.string :refer [blank?]]
             [reagent.core :as reagent]
             ["emoji-picker-element" :as emo]
@@ -24,45 +26,46 @@
        [:pre {:style {:word-break "break-word"}} (<sub [:note-info-raw]) ]]]]])
 
 (defn note-entry-box [reply-info]
-  (let [note-text (reagent/atom "")
-        picker-visible (reagent/atom false)]
-    (fn []
-      (reagent/create-class
-       {:reagent-render
-        (fn []
-          [:div.box.p-2.m-2
-           (if-let [n (:note reply-info)] [:small "Replying to " (or (:name n) (:npubkey n))])
-           [:div.block.m-2
-            [:textarea.textarea
-             {:id "entry-box" :placeholder "Hello Nostr" :rows 2 :on-change #(reset! note-text (-> % .-target .-value)) :value @note-text}]]
-           [:div.block.m-2
-            [:div.level
-             [:div.level-left
-              [:button.button.is-primary.level-item {:on-click #(do (>evt [:post-note @note-text reply-info]) (reset! note-text ""))} "Post"]
-              [:div.dropdown (if @picker-visible {:class "is-active"})
-               [:div.dropdown-trigger
-                [:button.button {:on-click #(swap! picker-visible not) :aria-haspopup "true" :aria-controls "emoji-picker-drop"}
-                 [:ion-icon {:name "happy-outline" :style {:font-size "20px"}}]]]
-               [:div.dropdown-menu {:id "emoji-picker-drop" :role "menu"}
-                [:div.dropdown-content
-                 [:div.dropdown-item.is-unselectable [(reagent/adapt-react-class "emoji-picker") {:id "emo-picker"}]]]]]]]]]) 
-        :component-did-mount (fn [comp]
-                               (let [picker (gdom/getElement "emo-picker")
-                                     element (.getElementById js/document "emoji-picker-drop")
-                                     entry-box (.getElementById js/document "entry-box")]
-                                 (gevents/listen picker "emoji-click"
-                                                 (fn [e] (do (swap! note-text #(str % (-> e (g/get "event_") .-detail .-unicode)))
-                                                             (swap! picker-visible not))))
-                                 (let [picker (gdom/getElement "emo-picker")]
-                                   (.catch (.close (.-database picker))) #(%))
-                                 (if-not (undefined? element)
-                                   (.scrollIntoView (.-parentElement element) false))
-                                 (if-not (undefined? entry-box)
-                                   (.focus entry-box))))
-        :component-will-unmount (fn [comp]
-                                  (let [picker (gdom/getElement "emo-picker")]
-                                    (.close (.-database picker))))
-        :display-name "emoji picker"}))))
+  (if (<sub [:is-logged-in])
+    (let [note-text (reagent/atom "")
+          picker-visible (reagent/atom false)]
+      (fn []
+        (reagent/create-class
+         {:reagent-render
+          (fn []
+            [:div.box.p-2.m-2
+             (if-let [n (:note reply-info)] [:small "Replying to " (or (:name n) (:npubkey n))])
+             [:div.block.m-2
+              [:textarea.textarea.is-size-5
+               {:id "entry-box" :placeholder "Hello Nostr" :rows 2 :on-change #(reset! note-text (-> % .-target .-value)) :value @note-text}]]
+             [:div.block.m-2
+              [:div.level
+               [:div.level-left
+                [:button.button.is-primary.level-item {:on-click #(do (>evt [:post-note @note-text reply-info]) (reset! note-text ""))} "Post"]
+                [:div.dropdown (if @picker-visible {:class "is-active"})
+                 [:div.dropdown-trigger
+                  [:button.button {:on-click #(swap! picker-visible not) :aria-haspopup "true" :aria-controls "emoji-picker-drop"}
+                   [:ion-icon {:name "happy-outline" :style {:font-size "20px"}}]]]
+                 [:div.dropdown-menu {:id "emoji-picker-drop" :role "menu"}
+                  [:div.dropdown-content
+                   [:div.dropdown-item.is-unselectable [(reagent/adapt-react-class "emoji-picker") {:id "emo-picker"}]]]]]]]]]) 
+          :component-did-mount (fn [comp]
+                                 (let [picker (gdom/getElement "emo-picker")
+                                       element (.getElementById js/document "emoji-picker-drop")
+                                       entry-box (.getElementById js/document "entry-box")]
+                                   (gevents/listen picker "emoji-click"
+                                                   (fn [e] (do (swap! note-text #(str % (-> e (g/get "event_") .-detail .-unicode)))
+                                                               (swap! picker-visible not))))
+                                   (let [picker (gdom/getElement "emo-picker")]
+                                     (.catch (.close (.-database picker))) #(%))
+                                   (if-not (undefined? element)
+                                     (.scrollIntoView (.-parentElement element) #js{"block" "end" "behaviour" "smooth"}))
+                                   (if-not (undefined? entry-box)
+                                     (.focus entry-box))))
+          :component-will-unmount (fn [comp]
+                                    (let [picker (gdom/getElement "emo-picker")]
+                                      (.close (.-database picker))))
+          :display-name "emoji picker"})))))
 
 (defn note-element [note]
   ^{:key (:id note)}
@@ -70,7 +73,7 @@
    [:figure.media-left.m-2
     [:div.image.is-32x32.is-rounded {:on-click #(do (>evt [:set-view [:user-feed (:pubkey note)]]) (.stopPropagation %))}
      (if-let [pic (:picture note)]
-       [:img.image.is-rounded {:src pic}]
+       [:img.image.is-rounded.is-32x32 {:src pic}]
        [:identicon-svg {:username (:pubkey note)}])
      [:div.level (if (:following note)
                    [:a.icon.level-item.has-text-danger-dark {:on-click #(do (>evt [:unfollow-user (:pubkey note)]) (.stopPropagation %))}
@@ -78,7 +81,7 @@
                    [:a.icon.level-item.has-text-success {:on-click #(do (>evt [:follow-user (:pubkey note)]) (.stopPropagation %))}
                     [:ion-icon {:name "person-add-outline"}]])]]]
    [:div.media-content
-    [:div.content.m-0 {:on-click #(do (>evt [:set-view [:thread-view (:id note)]]) (.stopPropagation %))}
+    [:div.content.m-0.is-clickable {:on-click #(do (>evt [:set-view [:thread-view (:id note)]]) (.stopPropagation %))}
      [:div.level.m-0
       [:span.level-item.level-left [:strong (:name note)] (gstring/unescapeEntities "&nbsp;") 
        [:small.is-size-7.is-family-code (:npubkey note)]]
@@ -121,12 +124,6 @@
    (for [note (<sub [:get-own-notes])]
      (note-element note))])
 
-(defn user-feed [pubkey]
-  [:div
-   [note-entry-box nil]
-   (for [note (<sub [:get-user-notes pubkey])]
-       (note-element note))])
-
 (defn thread-view [note-id]
   [:div
    (reduce (fn [acc v]
@@ -137,14 +134,37 @@
 
 (defn user-card [user]
   ^{:key (:pubkey user)}
-  [:article.media.m-0.p-0
+  [:article.media.m-0.p-0.is-clickable {:on-click #(>evt [:set-view [:user-feed (:pubkey user)]])}
    [:figure.media-left.m-2
     [:div.image.is-48x48
      (if-let [pic (:picture user)]              
-       [:img.image.is-48x48 {:src pic}]
+       [:img.image.is-48x48 {:src pic :style {:max-height 48}}]
        [:identicon-svg {:username (:pubkey user)}])]]
    [:div.media-content.m-2
-     [:div [:strong (:name user)] [:br] [:small.is-size-7.is-family-code (:npubkey user)]]]])
+    [:div [:strong (:name user)] [:span.tag.ml-2 (:npubkey user)]
+     [:br]
+     [:small (:about user)]]]])
+
+(defn large-user-card [pubkey]
+  (let [user (<sub [:user-metadata pubkey])]
+  ^{:key (:pubkey user)}
+  [:article.media.m-0.p-0  
+   [:figure.media-left.m-2
+    [:div.image {:style {:height 200 :width 200}}
+     (if-let [pic (:picture user)]              
+       [:img.image {:src pic :style {:height 200 :width 200}}]
+       [:identicon-svg {:username (:pubkey user)}])]]
+   [:div.media-content.m-2
+    [:div [:strong (:name user)] [:span.tag.ml-2 (:npubkey user)]
+     [:br]
+     [:small (:about user)]]]]))
+
+(defn user-feed [pubkey]
+  [:div
+   ;; [note-entry-box nil]
+   [large-user-card pubkey]
+   (for [note (<sub [:get-user-notes pubkey])]
+       (note-element note))])
 
 (defn follows-item [user]
   [user-card user])
@@ -168,20 +188,13 @@
   [:div
    (for [note (<sub [:logged-out-feed])]
      (note-element note))])
-
-(defn login-dialog []
-  [:div.modal (<sub [:logging-in])
-   [:div.modal-background]
-   [:div.modal-card
-    [:header.modal-card-head
-     [:p.modal-card-title "User Login"]]
-    [:section.modal-card-body
-     [:div.field
-      [:label.label "Private Key"]
-      [:div.control
-       [:input.input {:type "text" :placeholder "Private Key"}]]]
-     [:div.buttons [:a.button {:on-click #(>evt [:connect-extension])} "Connect Extension"]]]
-    [:footer.button.is-success "Save changes"]]])
+    ;; [:section.modal-card-body
+    ;;  [:div.field
+    ;;   [:label.label "Private Key"]
+    ;;   [:div.control
+    ;;    [:input.input {:type "text" :placeholder "Private Key"}]]]
+    ;;  [:div.buttons [:a.button {:on-click #(>evt [:connect-extension])} "Connect Extension"]]]
+    ;; [:footer.button.is-success "Save changes"]
 
 (defn field-array-fn
   [_props
@@ -193,7 +206,7 @@
   [:<>
    [:div.is-flex.is-flex-direction-row.is-align-content-top
     [:label.label "Relays"]
-    [:button.button.is-small.ml-4.p-3.is-light.is-success {:type "button" :on-click #(insert {:relay-url "wss://" :read true :write true})} "New relay"]]
+    [:button.button.is-small.ml-5.p-2.is-light.is-success {:type "button" :on-click #(insert {:relay-url "wss://" :read true :write true})} "New relay"]]
    (map-indexed
     (fn [idx field]
       ^{:key idx}
@@ -204,27 +217,27 @@
          :on-click #(when (> (count fields) 1) (remove idx))}
          [:span "Remove"]]
         [:div.field.m-0.is-align-self-center
-         [:input.input.pb-0.pt-0
+         [:input.input.pb-0.pt-0.is-size-6
           {:name :relay-url
            :value (get field :relay-url)
            :on-change #(handle-change % idx)
-           :on-blur #(handle-blur % idx)}]]
-        [:div.field.m-3.is-align-self-center
-         [:label.checkbox [:input
+           :on-blur #(handle-blur % idx)}]]       
+         [:div.field.pl-3
+          [:label.checkbox [:input
                            {:name :read
                             :type "checkbox"
                             :checked (get field :read) 
                             :value (get field :read)
                             :on-change #(handle-change % idx)
                             :on-blur #(handle-blur % idx)}] "Read"]]
-        [:div.field.m-3.is-align-self-center
-         [:label.checkbox.is-small [:input
+         [:div.field.pl-3
+          [:label.checkbox [:input
                            {:name :write
                             :type "checkbox"
                             :checked (get field :write) 
                             :value (get field :write)
                             :on-change #(handle-change % idx)
-                            :on-blur #(handle-blur % idx)}] "Write"]]]       
+                            :on-blur #(handle-blur % idx)}] "Write"]]]
        ])
     fields)
    ])
@@ -233,7 +246,7 @@
   [:form
     [bulma/input props
      {:name :name
-      :label "Name"
+      :label [:div [:span "Name"] [:span.tag.ml-2 {:style {:float "right"}} (:npubkey values)]]
       :placeholder "Name"
       :type "text"}]
     [bulma/input props
@@ -300,6 +313,66 @@
   ;;      [:span.file-cta [:span.file-icon [:ion-icon {:name "image-outline"}]]
   ;;       [:span.file-label "Choose image file…"]]]]
   ;;    ]))
+(defn logginin-modal []
+  [:div.modal (<sub [:logging-in])
+   [:div.modal-background]
+   [:div.modal-content
+   [:div.modal-card
+    [:header.modal-card-head
+     [:p.modal-card-title "Logging In"]]
+    [:section.modal-card-body
+     [:div.level
+      [:div.level-item
+       [:button.button.is-loading.is-large.is-success.is-rounded {:disabled true}]]]]]]])
+
+(defn create-account-modal []
+  [:div.modal.is-active
+   [:div.modal-background]
+   [:div.modal-content
+   [:div.modal-card    
+    [:header.modal-card-head
+     [:p.modal-card-title "Creating Account"]]
+    [:section.modal-card-body
+     (let [state (reagent/atom nil) pubkey (<sub [:own-pubkey])]
+       [:div.content
+        [fork/form {:state state
+                    :initial-values {:relays (mapv #(hash-map :relay-url % :read true :write true)  (keys (<sub [:relays])))
+                                     :npubkey (n/encode-hex "npub" pubkey)
+                                     }
+                    :keywordize-keys true
+                    :prevent-default? true}
+         user-settings-form]
+        [:div.block.mt-4 [:button.button.is-success {:on-click #(do (>evt [:save-user-settings (:values @state)])
+                                                                    (>evt [:logged-in-with-pubkey pubkey]))} "Save"]]
+        [:div.content.mt-2
+         [:label.label "Popular Relays"]
+         [pop-relays-table state]]])
+     ]]]])
+
+(defn key-form [{:keys [values] :as props}]
+  [:form
+   [bulma/input props         
+    {:name :secret
+     :label "Private Key"
+     :placeholder "nsec"
+     :type "text"}]])
+
+(defn provide-key-modal []
+  [:div.modal.is-active  
+   [:div.modal-background]
+   [:div.modal-content
+    [:div.modal-card
+     [:section.modal-card-body
+      (let [state (reagent/atom nil) pubkey (<sub [:own-pubkey])]
+        [:div.content
+         [fork/form {:state state
+                     :initial-values {}
+                     :keywordize-keys true
+                     :prevent-default? true}        
+          key-form]
+        [:div.block.mt-4
+         [:button.button.is-success
+          {:on-click #(>evt [:user-provided-secret (-> @state :values :secret (n/decode-b32))])} "Save"]]])]]]])
 
 (defn main-view-selector [] 
   (let [view (<sub [:view-selector])]
@@ -320,52 +393,81 @@
 
 (defn nav-list []
   (let [selected (first (<sub [:view-selector]))]
-  [:aside.menu.is-pulled-right
-   (if (<sub [:is-logged-in])
-     [:div [:div.media-content [user-ident]]      
-      [:ul.menu-list.m-1.is-size-5
-       [:li (if (= :follows-feed selected) {:class "has-background-white-bis"})
-        [:a {:on-click #(>evt [:set-view [:follows-feed]])}
-         [:span.icon-text [:span.icon [:ion-icon {:name "fast-food-outline"}]][:span "Follows Feed"]]]]
-       [:li (if (= :global-feed selected) {:class "has-background-white-bis"})
-        [:a {:on-click #(>evt [:set-view [:global-feed]])}
-         [:span.icon-text [:span.icon [:ion-icon {:name "earth-outline"}]][:span "Global"]]]]
-       [:li (if (= :notifications selected) {:class "has-background-white-bis"})
-        [:a {:on-click #(>evt [:set-view [:notifications]])}
-         [:span.icon-text [:span.icon
-                           [:ion-icon {:name (if (<sub [:unseen-mentions?]) "mail-unread-outline" "mail-outline")}]]
-                           [:span "Mentions"]]]]
-       [:li (if (= :private-messages selected) {:class "has-background-white-bis"})
-        [:a {:on-click #(>evt [:set-view [:private-messages]])}
-         [:span.icon-text [:span.icon [:ion-icon {:name "document-lock-outline"}]][:span "Messages"]]]]
-       [:li (if (= :follows-list selected) {:class "has-background-white-bis"})
-        [:a {:on-click #(>evt [:set-view [:follows-list]])}
-         [:span.icon-text [:span.icon [:ion-icon {:name "paw-outline" }]][:span "Following"]]]]
-       [:li (if (= :settings-view selected) {:class "has-background-white-bis"})
-        [:a {:on-click #(>evt [:set-view [:settings-view]])}
-         [:span.icon-text [:span.icon [:ion-icon {:name "settings-outline"}]][:span "Settings"]]]]]]
-     [:div [:a.button.is-primary {:on-click #(>evt [:start-login])} "Login" ]])]))
+    (if (<sub [:is-logged-in])
+      [:div.is-flex.is-flex-direction-column.is-pulled-right
+       [:aside.menu
+        [:div [:div.media-content [user-ident]]      
+         [:ul.menu-list.m-1.is-size-5
+          [:li (if (= :follows-feed selected) {:class "has-background-white-bis"})
+           [:a {:on-click #(>evt [:set-view [:follows-feed]])}
+            [:span.icon-text [:span.icon [:ion-icon {:name "fast-food-outline"}]][:span "Feed"]]]]
+          [:li (if (= :global-feed selected) {:class "has-background-white-bis"})
+           [:a {:on-click #(>evt [:set-view [:global-feed]])}
+            [:span.icon-text [:span.icon [:ion-icon {:name "earth-outline"}]][:span "Global"]]]]
+          [:li (if (= :notifications selected) {:class "has-background-white-bis"})
+           [:a {:on-click #(>evt [:set-view [:notifications]])}
+            [:span.icon-text [:span.icon
+                              [:ion-icon {:name (if (<sub [:unseen-mentions?]) "mail-unread-outline" "mail-outline")}]]
+             [:span "Mentions"]]]]
+          [:li (if (= :private-messages selected) {:class "has-background-white-bis"})
+           [:a {:on-click #(>evt [:set-view [:private-messages]])}
+            [:span.icon-text [:span.icon [:ion-icon {:name "document-lock-outline"}]][:span "Messages"]]]]
+          [:li (if (= :follows-list selected) {:class "has-background-white-bis"})
+           [:a {:on-click #(>evt [:set-view [:follows-list]])}
+            [:span.icon-text [:span.icon [:ion-icon {:name "paw-outline" }]][:span "Following"]]]]
+          [:li (if (= :settings-view selected) {:class "has-background-white-bis"})
+           [:a {:on-click #(>evt [:set-view [:settings-view]])}
+            [:span.icon-text [:span.icon [:ion-icon {:name "settings-outline"}]][:span "Settings"]]]]]]]
+       [:div.is-pulled-right.mt-4.p-4.is-align-self-flex-end
+        [:button.button.is-danger.is-light {:on-click #(>evt [:logout])}
+         [:ion-icon {:name "log-out-outline"}] "Logout"]]]
+      [:div.m-4.is-pulled-right
+       [:div.box.is-rounded.is-shadowless.has-background-white-bis.is-flex.is-flex-direction-column
+        [:div.ml-2 [:span.tag.is-success.is-light "Recommended"]]
+        [:button.button.is-success.m-2.is-medium {:on-click #(>evt [:connect-extension])} "Login with extension"]
+        [:hr]
+        [:button.button.m-2 {:on-click #(>evt [:create-account])} "Create new account" ]
+        [:button.button.m-2 {:on-click #(>evt [:provide-secret-key])} "Provide secret key" ]]])))
 
-(defn relay-elem [relay]
+(defn relay-elem [relay conf-relays]
   ^{:key (first relay)}
   [:span [:br]
-   [:small {:style {:text-overflow "ellipsis" :white-space "nowrap" :overflow "hidden" }}
-    [:span.icon [:ion-icon {:name (if (= :connected (second relay)) "cloud-done-outline" "cloud-offline-outline")}]]  (first relay)]])
+   [:span.icon-text.is-size-6 {:style {:text-overflow "ellipsis" :white-space "nowrap" :overflow "hidden"
+                                       :opacity (if (contains? conf-relays (first relay)) "1.0" "0.3")
+                                       }}
+    [:span.icon [:ion-icon
+                 (if (-> relay second :state (= :connected))
+                   {:name "cloud-done-outline" :style {:color "green"}}
+                   {:name "cloud-offline-outline" :style {:color "red"}})]]
+    (first relay)]])
 
 (defn connected-relays []
   [:div.box.is-pulled-left.is-shadowless.p-0
    [:p.mt-1.ml-4.mb-4 "Relays"
-    (for [relay (<sub [:connected-relays])]
-      (relay-elem relay))]])
+    (let [relays @r/relays-atom conf-relays (<sub [:own-relays])]
+      (for [relay relays]
+        (relay-elem relay conf-relays)))]])
 
 (defn main []
   [:<>
    [:nav.navbar.is-fixed-top {:role "navigation" :aria-label "main navigation"}
     [:div.navbar-brand ;; [:div.navbar-item.pb-3 [:svg {:style {:width "36px" :height "36px"} :viewBox "0 0 24 24"}
-                       ;;    [:path {:fill "#553121" :d "M14.83,11.17C16.39,12.73 16.39,15.27 14.83,16.83C13.27,18.39 10.73,18.39 9.17,16.83L14.83,11.17M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M7,4A1,1 0 0,0 6,5A1,1 0 0,0 7,6A1,1 0 0,0 8,5A1,1 0 0,0 7,4M10,4A1,1 0 0,0 9,5A1,1 0 0,0 10,6A1,1 0 0,0 11,5A1,1 0 0,0 10,4M12,8A6,6 0 0,0 6,14A6,6 0 0,0 12,20A6,6 0 0,0 18,14A6,6 0 0,0 12,8Z"}]]]
+     ;;    [:path {:fill "#553121" :d "M14.83,11.17C16.39,12.73 16.39,15.27 14.83,16.83C13.27,18.39 10.73,18.39 9.17,16.83L14.83,11.17M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M7,4A1,1 0 0,0 6,5A1,1 0 0,0 7,6A1,1 0 0,0 8,5A1,1 0 0,0 7,4M10,4A1,1 0 0,0 9,5A1,1 0 0,0 10,6A1,1 0 0,0 11,5A1,1 0 0,0 10,4M12,8A6,6 0 0,0 6,14A6,6 0 0,0 12,20A6,6 0 0,0 18,14A6,6 0 0,0 12,8Z"}]]]     
      [:div.navbar-item.is-unselectable.pl-6.m-0.pb-0.pt-0 {:style {:font-family "Slackey" :font-size "32px" :color "#553121"}}
-      "nostromat" ]]]
-   (login-dialog)
+      "nostromat"]]
+    ;; [:div.navbar-item
+     [:nav.level.is-overlay
+      (if (<sub [:is-logged-in])
+        [:div.level-item.mt-5
+         [:button.button.is-focused.is-rounded.is-link.is-inverted.p-0.m-2 {:on-click #(>evt [:set-view (<sub [:previous-view-selector])])}
+          [:ion-icon.m-0.p-0 {:name "arrow-back-outline" :size "large"}]]
+         [:button.button.is-focused.is-rounded.is-link.is-inverted.p-0.m-2 {:on-click #(.scrollTo js/window #js{"top" 0 "behaviour" "smooth"})}          
+          [:ion-icon.m-0.p-0 {:name "arrow-up-outline" :size "large"}]]])]]
+   (if (<sub [:creating-account])
+     [create-account-modal])
+   (if (<sub [:providing-secret-key])
+     [provide-key-modal])
+   (logginin-modal)
    (note-info-modal)
    [:div.content.pt-2
    [:div.columns
@@ -377,4 +479,4 @@
       [:div.m-0 [connected-relays]]
       ;; [:div [:pre.is-size-7 (with-out-str (pprint @r/relays-atom))]]
       [:div [:pre.is-size-7 "Stats" (<sub [:db-stats])]]]]]
-   [:footer.footer.p-4 [:div.content.has-text-centered [:p "Nostr client by Oberi" ]]]]])
+   [:footer.footer.p-4 [:div.content [:p "nostromat" ]]]]])
