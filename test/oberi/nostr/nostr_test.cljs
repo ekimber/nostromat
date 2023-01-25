@@ -102,6 +102,6 @@
         pk-b32 (n/encode-hex "nsec" pk)]    
     (is (= pk (n/decode-b32 pk-b32)))))    
         
-;; (deftest url-linking
-;;   (let [url-text "foo bar http://duck.com walrus https://yaaya.de xxx"]
-;;       (is (= (n/insert-urls url-text (n/url-find url-text) 0) "foo"))))
+(deftest url-linking
+  (let [url-text "foo bar http://duck.com walrus https://yaaya.de xxx"]
+      (is (= (n/insert-urls url-text (n/url-find url-text) 0) "foo"))))

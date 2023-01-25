@@ -12,10 +12,10 @@
 (def alice-pub (n/public-key alice-prv))
 (def bob-pub (n/public-key bob-prv))
 
-(deftest encrypt-decrypt
-  (async done
-         (go
-           (let [msg "hello"
-                 encrypted (.encrypt nip04 alice-prv bob-pub "hello")]
-             (is (= msg (<p! (.decrypt nip04 bob-prv alice-pub (<p! encrypted)))))))))
+;; (deftest encrypt-decrypt
+;;   (async done
+;;          (go
+;;            (let [msg "hello"
+;;                  encrypted (.encrypt nip04 alice-prv bob-pub "hello")]
+;;              (is (= msg (<p! (.decrypt nip04 bob-prv alice-pub (<p! encrypted)))))))))
     

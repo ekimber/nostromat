@@ -65,7 +65,7 @@
                                        element (.getElementById js/document "emoji-picker-drop")
                                        entry-box (.getElementById js/document "entry-box")]
                                    (gevents/listen picker "emoji-click"
-                                                   (fn [e] (do (swap! note-text #(str % (-> e (g/get "event_") .-detail .-unicode)))
+                                                   (fn [e] (do (swap! note-text #(str % (-> e (g/get "Md") .-detail .-unicode)))
                                                                (swap! picker-visible not))))
                                    (let [picker (gdom/getElement "emo-picker")]
                                      (.catch (.close (.-database picker))) #(%))
@@ -125,7 +125,7 @@
         (if (:invoice note) [:span.is-pulled-right.is-clickable.is-size-6 "Lightning Invoice"
                              [:div.mt-1 {:on-click #(do (swap! inv-toggle not) (.stopPropagation %))}
                               [(reagent/adapt-react-class QRCodeSVG)
-                               {:value (-> note :invoice :paymentRequest) :size 128}]]])
+                               {:value (-> note :invoice :paymentRequest clojure.string/upper-case) :size 128}]]])
         (:display note)
         (if (:invoice note)
           [:div.card (if (and inv-toggle @inv-toggle) {:style {:position "absolute" :top "0px" :z-index "3"

@@ -8,7 +8,6 @@
             ["@noble/secp256k1" :as secp]
             ["nanoid/generate" :as r]
             ["bolt11" :as inv]
-            ["qrcode.react" :refer [QRCodeSVG]]
             [cljs.core.async.interop :refer-macros [<p!]]
             [cljs.core.async :as async :refer [<!]]
             [cljs.pprint :refer [pprint]])
@@ -95,7 +94,7 @@
                                            (str sym (if (> cnt 1) (str " " cnt) "")))))})
 
 (defn decode-invoice [text]
-  (if-let [bolt11 (re-find #"lnbc[a-zA-Z0-9]+" text)]
+  (if-let [bolt11 (re-find (js/RegExp. "lnbc[a-z0-9]+" "i") text)]
     (try
       (merge (js->clj (.decode inv bolt11) :keywordize-keys :true) {:paymentRequest bolt11})
       (catch js/Error e (pprint {:error "Could not decode invoice"
@@ -110,15 +109,15 @@
   (let [url (first urls)]
     (if (seq (rest urls))
       (conj (insert-urls s (rest urls) (:end url))
-              ^{:key (str offset (:href url))}[url-elem (:href url)]
-              ^{:key (str (subs s 16))}(subs s offset (:start url)))
-        (list ^{:key (:href url)}[url-elem (:href url)] (subs s (:end url))))))
+            ^{:key (str offset (:href url))}[url-elem (:href url)]
+            (subs s offset (:start url)))
+      (list (subs s offset (:start url)) ^{:key (subs s offset (:start url))}[url-elem (:href url)] (subs s (:end url))))))
 
 (defn url-find [content]
   (js->clj (link/find (clj->js content) "url") :keywordize-keys true))
 
 (defn create-display-element [content urls]  
-  (let [invoice (re-find #"lnbc[a-zA-Z0-9]+" content)
+  (let [invoice (re-find (js/RegExp. "lnbc[a-z0-9]+" "i") content)
         rep-ctnt (if invoice (clojure.string/replace content invoice "") content)]
     [:span.m-0 {:style {:word-break "break-word" :text-align "left"}} 
      (if (seq urls) (insert-urls content urls 0) rep-ctnt)]))
