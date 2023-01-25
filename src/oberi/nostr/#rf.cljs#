@@ -65,9 +65,9 @@
  :connect-relays
  (fn [relays]  
    (go     
-     (let [conn-promises (for [relay relays] (mgr/connect (first relay) (second relay)
-                                                          {:on-disconnect sbm/handle-disconnect
-                                                           :on-connect sbm/handle-connect}))
+     (let [conn-promises (for [relay relays]
+                           (mgr/connect (first relay) (second relay) {:on-disconnect sbm/handle-disconnect
+                                                                      :on-connect sbm/handle-connect}))
            conns (<! (async/map vector conn-promises))]
        (>evt [:relays-connected conns])))))
 

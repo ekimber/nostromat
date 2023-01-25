@@ -2,39 +2,16 @@
   (:require [lambdaisland.deja-fu :as fu]
             [clojure.string :refer [blank? includes?]]
             [goog.crypt :as crypt]
+            [reagent.core :as reagent]
             ["linkifyjs" :as link]
             ["@scure/base" :as b]
             ["@noble/secp256k1" :as secp]
             ["nanoid/generate" :as r]
+            ["bolt11" :as inv]
             [cljs.core.async.interop :refer-macros [<p!]]
             [cljs.core.async :as async :refer [<!]]
             [cljs.pprint :refer [pprint]])
   (:require-macros [cljs.core.async.macros :refer [go]]))
-
-;; Filters object
-;; {
-;;   "ids": <a list of event ids or prefixes>,
-;;   "authors": <a list of pubkeys or prefixes, the pubkey of an event must be one of these>,
-;;   "kinds": <a list of a kind numbers>,
-;;   "#e": <a list of event ids that are referenced in an "e" tag>,
-;;   "#p": <a list of pubkeys that are referenced in a "p" tag>,
-;;   "since": <a timestamp, events must be newer than this to pass>,
-;;   "until": <a timestamp, events must be older than this to pass>,
-;;   "limit": <maximum number of events to be returned in the initial query>
-;; }
-;; {
-;;   "id": <32-bytes sha256 of the the serialized event data>
-;;   "pubkey": <32-bytes hex-encoded public key of the event creator>,
-;;   "created_at": <unix timestamp in seconds>,
-;;   "kind": <integer>,
-;;   "tags": [
-;;     ["e", <32-bytes hex of the id of another event>, <recommended relay URL>],
-;;     ["p", <32-bytes hex of the key>, <recommended relay URL>],
-;;     ... // other kinds of tags may be included later
-;;   ],
-;;   "content": arbitrary string,
-;;   "sig": <64-bytes signature of the sha256 hash of the serialized event data, which is the same as the "id" field>
-;;  }
 
 (def decoder (js/TextDecoder. "utf-8"))
 (def encoder (js/TextEncoder. "utf-8"))
@@ -46,9 +23,6 @@
 
 (defprotocol Message
   (wire [m]))
-
-;; (defprotocol RequestMessage
-;;   (subscription-id [m]))
 
 (defn to-json [obj]
   (.stringify js/JSON (clj->js obj)))
@@ -86,23 +60,18 @@
   NostrEvent
   (wire [m] (to-json (conj (vals m) 0))))
 
-(defrecord Subscription [id perpetual])
-
-(defrecord QueryRequest [^Subscription subscription filter]
-  Message
-  (wire [m] ["REQ" (-> m :subscription :id) filter]))
-
-(defrecord CloseRequest [^Subscription subscription]
-  Message
-  (wire [m] ["CLOSE" (-> m :subscription :id)]))
-
 (defn truncate-string [s len]  
-  (if (or (nil? s) (> 9 len))
+  (if (or (nil? s) (> 9 len) (> (+ 3 len) (count s)))
     s
     (let [end-size (/ (- len 3) 2)
           start (subs s 0 end-size)
           end (subs s (- (count s) end-size) (count s))]
       (str start "…" end))))
+
+(defn truncate-end [s len]
+  (if (and s (> (count s) (inc len)))
+    (str (subs s 0 len) "…")
+    s))
 
 (defn encode-hex [prefix hex]
   (.encode b/bech32 prefix (->> (.hexToBytes secp/utils hex)
@@ -112,19 +81,6 @@
       .-words
       (.fromWords b/bech32)
       (.bytesToHex secp/utils)))
-  
-
-(defn ^RequestMessage author-req-msg [subs-id pubkey-list]
-  ["REQ" subs-id {:authors pubkey-list
-                  :limit 200}])
-
-(defn ^RequestMessage metadata-req-msg [subs-id pubkey-list]
-  ["REQ" subs-id {:authors pubkey-list
-                  :limit 200
-                  :kinds [0]}])
-
-(defn ^RequestMessage fetch-notes-req [subs-id notes-list]
-  ["REQ" subs-id ])
 
 (defn short-date [epoch-sec]
   (-> (js/goog.date.DateTime.fromTimestamp (* 1000 epoch-sec))
@@ -136,29 +92,40 @@
    :other-text (apply str (interpose " " (for [[sym p-set] (:other reactions)
                                                :let [cnt (count p-set)]]
                                            (str sym (if (> cnt 1) (str " " cnt) "")))))})
-  
-(defn link-url [be4 href aft]
-  [:span.m-0 {:style {:word-break "break-word" :text-align "left"}} be4
-       [:a {:href href :target "_blank" :on-click #(.stopPropagation %)} href]
-   aft])
 
-(defn link-img [be4 href aft]
-  [:div.is-flex.is-flex-direction-column      
-   [:span.m-0 {:style {:word-break "break-word" :text-align "left"}} be4]
-   [:img.is-align-self-baseline {:src href :style {:max-height 240 :max-width 480}}]
-   [:span.m-0 {:style {:word-break "break-word" :text-align "left"}} aft]])
+(defn decode-invoice [text]
+  (if-let [bolt11 (re-find (js/RegExp. "lnbc[a-z0-9]+" "i") text)]
+    (try
+      (merge (js->clj (.decode inv bolt11) :keywordize-keys :true) {:paymentRequest bolt11})
+      (catch js/Error e (pprint {:error "Could not decode invoice"
+                                 :msg e}))))) ;; paranoia!!
+    
+(defn url-elem [href]  
+  (if (re-find #".*\.(png|jpeg|GIF|gif|jpg)$" href)
+    [:img.is-align-self-baseline {:src href :style {:max-height 240 :max-width 480} :data-reactid href}]
+    [:a {:href href :target "_blank" :on-click #(.stopPropagation %) :data-reactid href} href]))
 
-(defn insert-urls [s urls]
-  (let [url (first urls)
-        be4 (subs s 0 (:start url))
-        aft (subs s (:end url))
-        href (:href url)]
-    (if (re-find #".*\.(png|jpeg|GIF|gif|jpg)$" href)
-      (link-img be4 href aft)
-      (link-url be4 href aft))))
-                 
+(defn insert-urls [s urls offset]
+  (let [url (first urls)]
+    (if (seq (rest urls))
+      (conj (insert-urls s (rest urls) (:end url))
+            ^{:key (str offset (:href url))}[url-elem (:href url)]
+            (subs s offset (:start url)))
+      (list (subs s offset (:start url)) ^{:key (subs s offset (:start url))}[url-elem (:href url)] (subs s (:end url))))))
+
+(defn url-find [content]
+  (js->clj (link/find (clj->js content) "url") :keywordize-keys true))
+
+(defn create-display-element [content urls]  
+  (let [invoice (re-find (js/RegExp. "lnbc[a-z0-9]+" "i") content)
+        rep-ctnt (if invoice (clojure.string/replace content invoice "") content)]
+    [:span.m-0 {:style {:word-break "break-word" :text-align "left"}} 
+     (if (seq urls) (insert-urls content urls 0) rep-ctnt)]))
+
+(defn at-ref []) 
 
 (defn project-note [note]
+  (if (nil? (:content note)) (pprint {:nil? note}))
   (let [age-seconds (- (/ (.now js/Date) 1000)  (:created_at note))
         readable-age (cond
                        (< age-seconds 60) (str (int age-seconds) "s")
@@ -166,19 +133,18 @@
                        (< age-seconds 86400) (str (int (/ age-seconds 3600)) "h")
                        :else (short-date (:created_at note)))
         content (:content note)
-        urls (js->clj (link/find (clj->js content) "url") :keywordize-keys true)]
+        urls (url-find content)]
     
     {:id (:id note)
+     :invoice (decode-invoice content)
      :highlighted (:highlighted note)
      :pubkey (:pubkey note)
      :npubkey (if-let [p (:pubkey note)] (encode-hex "npub" p))
-     :display (if-let [d (:display note)] d
-                      (if-let [urls (seq urls)] (insert-urls content urls)
-                              [:span.m-0 {:style {:word-break "break-word" :text-align "left"}} content]))
+     :display (if-let [d (:display note)] d (create-display-element content urls))
      :age readable-age
      :reactions (reactions-to-text (:reactions note))
-     :replying (:replying note)
-     :name (:name note)
+     :replying (:replying note) ;; (map #(truncate-end % 17) (:replying note))
+     :name (truncate-end (:name note) 19)
      :picture (:picture note)
      :child (:child note)
      :following (:follows note)}))
@@ -225,7 +191,8 @@
     {:link (first tag) :link-relay (second tag)}))
 
 (defn parse-notes-tags [tags]
-  ;; e id relay type
+  ;; e id relay? type?
+  ;; p id relay?
   (let [g (group-by first tags)
         ees (map (comp e-tag rest) (get g "e"))
         pees (map rest (get g "p"))]
@@ -251,17 +218,3 @@
 
 (defn public-key [private-key]
   (.bytesToHex secp/utils (.getPublicKey secp/schnorr private-key)))
-
-(defn contact-feed-req [pubkey contact-list]
-  (->QueryRequest (->Subscription (str "cntfd" pubkey) true)
-                        {:authors (conj (mapv :pubkey contact-list) pubkey)
-                         :kinds [1 2 6 7] :limit 150}))
-
-(defn contact-list-req [pubkey contact-list]
-  (->QueryRequest (->Subscription (str "cnt" pubkey) true)
-                        {:authors (conj (mapv :pubkey contact-list) pubkey)
-                         :kinds [0 3] :limit (max 5 (inc (count contact-list)))}))
-
-(defn private-msg-req [pubkey]
-  (->QueryRequest (->Subscription (str "prv" pubkey) true)
-                        {:kinds [4] :#p [pubkey] :limit 100}))
