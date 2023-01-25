@@ -2,7 +2,6 @@
   (:require
    [reagent.dom :as rdom]
    [re-frame.core :as re-frame]
-   [re-promise.core]
    [oberi.nostr.rf :as rf :refer [<sub >evt >evt-now]]
    [oberi.nostr.views :as views]
    [oberi.nostr.config :as config]))

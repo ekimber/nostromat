@@ -1,13 +1,41 @@
 (ns oberi.nostr.crypt
-  (:require ["@noble/secp256k1" :as secp]
-            ["nanoid/generate" :as r]
-            ["goog.crypt.Cbc" :as cbc]))
+  (:require
+   ;; ["@noble/secp256k1" :as secp]
+   ;; ["nanoid/generate" :as r]
+   ;; [goog.crypt :as c]
+   [cljs.pprint :refer [pprint]]
+   ["nostr-tools" :refer [nip04 getPublicKey generatePrivateKey]]
+   ;; [goog.crypt.Aes :as Aes]
+   ;; [goog.crypt.Cbc :as Cbc]
+   ))
 
-(defn encrypt [our-priv their-pub]
-  (let [shared-point (.getSharedSecret secp our-opriv (str "02" their-pub))
-        shared-x (subs 2 64)
-    
+(defn encrypt
+  [private-key public-key message]
+  (.encrypt nip04 private-key public-key message))
+  
+(defn decrypt
+  [private-key public-key crypt-text]
+   (.decrypt nip04 private-key public-key crypt-text))
 
+;; (def aes-256 (.Aes 256))
+
+;; (defn x-encrypt [our-priv their-pub msg]
+;;   (let [shared-point (.getSharedSecret secp our-priv (str "02" their-pub))
+;;         shared-x (.subarray shared-point 2 64)
+;;         iv (r "1234567890abcdef" 32)
+;;         ;; buf (.from js/Buffer shared-x "hex")
+;;         ;; aes (.Aes buf)
+;;         key (c/hexToByteArray shared-x)
+;;         aes (.c/Aes key)
+;;         cbc (.c/Cbc aes)]
+;;     (pprint key)))
+
+
+;; (defn encrypt [our-priv their-pub msg]
+;;   (let [shared-point (.getSharedSecret secp our-priv (str "02" their-pub))
+;;         shared-x (.subarray shared-point 2 64)
+;;         iv 
+        
   
 ;; import crypto from 'crypto'
 ;; import * as secp from 'noble-secp256k1'

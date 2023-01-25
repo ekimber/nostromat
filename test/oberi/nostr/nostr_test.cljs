@@ -83,6 +83,13 @@
 (deftest generate-empty-root-tags
   (is (= [["e" :aa]["p" :11]]
          (n/generate-reply-tags [] :aa :11))))
+
+(deftest parse-tags
+  (let [tags [["e" "bf" "wss://relay.nostr.pro"]
+              ["e" "fe"]
+              ["p" "20"]
+              ["p" "7d" "wss://foo.bar"]]]
+  (is (= '(("20") ("7d" "wss://foo.bar")) (:replying (n/parse-notes-tags tags))))))
             
 ;; (deftest likes-test
 ;;   (let [one-like  {:likes 1, :other {"🤙" 2}}
@@ -95,3 +102,6 @@
         pk-b32 (n/encode-hex "nsec" pk)]    
     (is (= pk (n/decode-b32 pk-b32)))))    
         
+;; (deftest url-linking
+;;   (let [url-text "foo bar http://duck.com walrus https://yaaya.de xxx"]
+;;       (is (= (n/insert-urls url-text (n/url-find url-text) 0) "foo"))))

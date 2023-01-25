@@ -3,7 +3,21 @@
    [re-frame.core :refer [reg-sub]]
    [oberi.nostr.nostr :as n]
    [loom.graph :as g]
-   [loom.alg :as alg]))
+   [loom.alg :as alg]
+   [goog.date]
+   [lambdaisland.deja-fu :as fu]
+   [cljs.pprint :refer [pprint]])
+  (:import [goog.date DateTime]))
+
+(defn secs-to-date [secs]
+  (-> (* 1000 secs)
+       DateTime/fromTimestamp
+       (fu/format "dd. MMM HH:mm:ss")))
+  
+(reg-sub
+ :extension-unavailable?
+ (fn [_]
+   (nil? (.-nostr js/window))))
 
 (reg-sub
  :view-selector
@@ -58,7 +72,7 @@
 (reg-sub
  :relays
  (fn [db _]
-   (:relays db)))
+   (-> db :relays :list)))
 
 (reg-sub
  :note-graph
@@ -76,6 +90,11 @@
    (:mentions db)))
 
 (reg-sub
+ :messages
+ (fn [db _]
+   (vals (:messages db))))
+
+(reg-sub
  :recent-mentions
  (fn [db _]
    (set (keys (:recent-mentions db)))))
@@ -86,17 +105,40 @@
    (:recommended-relays db)))
 
 (reg-sub
+ :private-key
+ (fn [db _]
+   (some->> (:private-key db) (n/encode-hex "nsec"))))
+
+(reg-sub
  :note-info-raw
  (fn [db [_ note-id]]
-   (with-out-str (cljs.pprint/pprint (dissoc (get-in db [:notes (:showing-raw-note-info db)]) :content)))))
+   (with-out-str (pprint (dissoc (get-in db [:notes (:showing-raw-note-info db)]) :content)))))
 
+(defn placeholder [id]
+  {:name  (n/encode-hex "npub" id)
+   :id id
+   :content ""   
+   :display [:div.level.mt-2 [:div.icon.level-item [:ion-icon {:name "cloud-offline-outline" :style {:font-size "32px"}}]]]})
 
-;; (reg-sub
-;;  :reactions-reduced
-;;  :<- [:reactions]
-;;  (fn [reactions _]
-;;    (let [other (:other reactions)]
-;;      )
+(defn note-decorator [reactions name-pics follows]
+  (fn [note]
+    (-> (assoc note :reactions (get reactions (:id note)))
+        (merge (get name-pics (:pubkey note)))
+        (assoc :follows (follows (:pubkey note)))
+        n/project-note)))
+
+(reg-sub
+ :get-note
+ :<- [:notes-with-replypubs]
+ :<- [:pubs-to-names-pics]
+ :<- [:reactions]
+ :<- [:own-follows-set]
+ (fn [[notes pubs-names reactions follows][_ note-id]]
+   (let [note (get notes note-id)]
+     ;; (pprint note)
+     (if note       
+       ((note-decorator reactions pubs-names follows) note)
+       (placeholder note-id)))))
 
 (reg-sub
  :user-metadata
@@ -123,6 +165,13 @@
  :<- [:own-contacts]
  (fn [contacts _]
    (into #{} (map :pubkey contacts))))
+
+(reg-sub
+ :is-following?
+ :<- [:own-follows-set]
+ (fn [follows [_ pubkey]]
+   (follows pubkey)))
+   
 
 (reg-sub
  :own-relays
@@ -168,6 +217,15 @@
    (filter #(= (:pubkey %) pubkey) notes)))
 
 (reg-sub
+ :convo-with-pubkey
+ :<- [:messages]
+ :<- [:own-pubkey]
+ (fn [[messages own-pubkey] [_ pubkey]]
+   (->> (filter #(or (= pubkey (:pubkey-from %)) (= pubkey (:pubkey-to %))) messages)
+        (sort-by :created-at)
+        (map #(assoc % :time (-> % :created-at secs-to-date))))))
+
+(reg-sub
  :pubs-to-names
  :<- [:metadata]
  (fn [metadata _]
@@ -180,15 +238,16 @@
    (zipmap (keys metadata) (map #(select-keys % [:name :picture]) (vals metadata)))))
 
 (defn replying-str [p-to-n ps]
-  (let [m (group-by #(contains? p-to-n %) (map first ps))
-        found (map #(get p-to-n %) (get m true))
-        not-found (get m false)
+  (let [m (group-by #(-> (get p-to-n %) empty?) (map first ps))
+        found (map #(n/truncate-string % 15) (map #(get p-to-n %) (get m false)))
+        not-found (get m true)
         not-found-npubs (map #(n/truncate-string (n/encode-hex "npub" (first %)) 15) ps)
         cnt-found (count (vals found))]
-    (cond
-      (>= 4 cnt-found) found
-      (< 4 cnt-found) (conj (vec (take 4 found)) (str "and " (- (count ps) cnt-found) " others"))
-      :else (conj (concat found (take (- 4 cnt-found) not-found-npubs)) (str "and " (- (count ps) 4) " others")))))
+    (if (> (count ps) 4)
+      (if (> cnt-found 4)
+        (conj (take 4 found) (str " and " (- (count ps) 4) " others"))
+        (concat found (take (- 4 cnt-found) not-found-npubs) (list (str "and " (- (count ps) 4) " others"))))
+      (concat found (take (- 4 cnt-found) not-found-npubs)))))
 
 (reg-sub
  :notes-with-replypubs
@@ -199,19 +258,6 @@
            (map (fn [note]
                   (update-in note [:replying] #(replying-str pubs-to-names %)))
                 (vals notes)))))
-
-(defn placeholder [id]
-  {:name  (n/encode-hex "npub" id)
-   :id id
-   :content ""   
-   :display [:div.level.mt-2 [:div.icon.level-item [:ion-icon {:name "cloud-offline-outline" :style {:font-size "32px"}}]]]})
-
-(defn note-decorator [reactions name-pics follows]
-  (fn [note]
-    (-> (assoc note :reactions (get reactions (:id note)))
-        (merge (get name-pics (:pubkey note)))
-        (assoc :follows (follows (:pubkey note)))
-        n/project-note)))
 
                                         ;=== view functions
 (reg-sub
@@ -269,11 +315,7 @@
           vals
           (filter #(= pubkey (:pubkey %)))
           (sort-by :created_at >)
-          (map (note-decorator reactions name-pic follows))
-          ;; (map (partial merge name-pic))
-          ;; (map #(assoc % :reactions (get reactions (:id %))))
-          ;; (map project-note)
-          ))))
+          (map (note-decorator reactions name-pic follows)) ))))
 
 (reg-sub
  :get-user-notes
@@ -344,6 +386,15 @@
         (map (note-decorator reactions pubs-names follows)))))
 
 (reg-sub
+ :private-convos
+ :<- [:messages]
+ :<- [:own-pubkey]
+ (fn [[messages pubkey]]
+   (disj (->> (map #((juxt :pubkey-from :pubkey-to) %) messages)
+              flatten
+              (into #{})) pubkey)))
+
+(reg-sub
  :login-state
  (fn [db _]
    (:login-state db)))
@@ -388,11 +439,13 @@
  :user-settings
  :<- [:own-metadata]
  :<- [:own-relays]
- (fn [[metadata user-relays] _]
+ :<- [:private-key]
+ (fn [[metadata user-relays private-key] _]
    ;; transform the user's relay metadata into a map with keys  [:relay-url :read :write]
    (let [relay-fn (juxt first #(-> % second :read) #(-> % second :write))
          relays (mapv #(zipmap [:relay-url :read :write] (relay-fn %)) user-relays)]
-     (assoc metadata :relays relays))))
+     (-> (assoc metadata :relays relays)
+         (assoc :private-key private-key)))))
 
 (reg-sub
  :configured-relays
@@ -412,7 +465,7 @@
  :<- [:relays]
  (fn [[metadata notes contacts reactions relays] _]
    (with-out-str
-     (cljs.pprint/pprint {:notes (count notes)
-                          :contacts (count contacts)
-                          :metadata (count metadata)
-                          :reactions (count reactions)}))))
+     (pprint {:notes (count notes)
+              :contacts (count contacts)
+              :metadata (count metadata)
+              :reactions (count reactions)}))))
