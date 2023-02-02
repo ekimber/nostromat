@@ -2,6 +2,7 @@
   (:require [oberi.nostr.rf :as rf :refer [<sub >evt]]
             [oberi.nostr.manager :as mgr]
             [oberi.nostr.nostr :as n]
+            [oberi.nostr.charts :as c]
             [oberi.nostr.subs]
             [clojure.string :refer [blank?]]
             [reagent.core :as reagent]
@@ -18,7 +19,7 @@
             [fork.bulma :as bulma]
             [cljs.core.async :as async :refer [<! >!]]
             [cljs.core.async.interop :refer-macros [<p!]]
-            [cljs.pprint :refer [pprint]])
+            [cljs.pprint :refer [pprint cl-format]])
   (:require-macros [cljs.core.async.macros :refer [go]]))
 
 (def note-text (reagent/atom ""))
@@ -537,7 +538,7 @@
         [:button.button.m-2 {:on-click #(>evt [:create-account])} "Create new account" ]
         [:button.button.m-2 {:on-click #(>evt [:provide-secret-key])} "Provide secret key" ]]])))
 
-(defn relay-elem [relay conf-relays]
+(defn relay-elem [relay conf-relays fact]
   [:span [:br]
    [:span.icon-text.is-size-6 {:style {:text-overflow "ellipsis" :white-space "nowrap" :overflow "hidden"
                                        :opacity (if (contains? conf-relays (first relay)) "1.0" "0.3")
@@ -548,14 +549,18 @@
                        :connecting {:name "cloud-outline" :style {:color "yellow"}}
                        :disconnected {:name "cloud-offline-outline" :style {:color "red"}}
                        {:name "help-outline"})]]
-    (first relay)]])
+    [:span.is-family-code (cl-format nil "~,2f" fact) (gstring/unescapeEntities "&nbsp;")] (first relay)]])
+
 
 (defn connected-relays []
   [:div.box.is-pulled-left.is-shadowless.p-0
-   [:p.mt-1.ml-4.mb-4 "Relays"
-    (let [conf-relays (<sub [:own-relays])]
+   [:p.mt-1.ml-4.mb-2 "Relays"
+    (let [conf-relays (<sub [:own-relays])
+          relay-stats @mgr/relay-stats
+          relay-max (reduce max (vals (:msg-count relay-stats)))]
       (for [relay @mgr/conns]
-        ^{:key (first relay)}[relay-elem relay conf-relays]))]])
+        ^{:key (first relay)}[relay-elem relay conf-relays (/ (get-in relay-stats [:msg-count (first relay)]) relay-max)]))]
+   [:div [c/relay-analyzer]]])
 
 (defn relay-info-detail []
   )
@@ -570,7 +575,8 @@
          (let [conns @mgr/conns
                subs-san-fn (fn [s] (zipmap (keys s) (map #(dissoc % :source) (vals s))))
                sanitised (zipmap (keys conns) (map (comp #(dissoc % :multi :sink :source :socket :conn) #(update-in % [:subs] subs-san-fn)) (vals conns)))]
-           (with-out-str (cljs.pprint/pprint sanitised)))]]])))
+           (with-out-str (cljs.pprint/pprint sanitised))
+           )]]])))
 
 (defn main []
   [:<>
@@ -606,5 +612,6 @@
        [connected-relays]]
       ;; [:div [:pre.is-size-7 (with-out-str (pprint @r/relays-atom))]]
       [:div [:pre.is-size-7 "Stats" (<sub [:db-stats])]]
-      [:div [relay-info]]]]]]
+      [:div [relay-info]]        
+      ]]]]
    [:footer.footer.p-4 [:div.content [:p "nostromat" ]]]])

@@ -16,6 +16,8 @@
 
 (def conns (reagent/atom {}))
 
+(def relay-stats (atom {}))
+
 (def log-atom (reagent/atom {}))
 
 (def connection-mgr-q (chan))
@@ -75,6 +77,10 @@
   (pprint {:socket-id socket-id :msg "connection failed" :reason reason})
   (close! conn))
 
+(defn save-id! [evt socket-id]
+  (let [id (get evt "id")] (swap! relay-stats (fn [s] (-> (update-in s [:presence id] #(conj (or % #{}) socket-id))
+                                                          (update-in [:msg-count socket-id] inc))))))
+
 (defn new-connection [socket-id {:keys [read write]} & {:keys [on-connect on-disconnect] :as opts}]
   (let [conn (async/promise-chan)]
     (swap! conns #(assoc-in % [socket-id] {:state :connecting :conn conn :opts opts}))
@@ -90,9 +96,10 @@
                                                        :multi multi :sink sink :socket socket :conn conn :source source}))
                 (>! conn {:multi multi :sink sink :socket-id socket-id})
                 (if on-connect (on-connect conn))
-                (let [t (tap multi (chan))]
+                (let [t (tap multi (chan 100))]
                   (loop []
-                    (when-let [v (<! t)]                    
+                    (when-let [v (<! t)]
+                      (when (= "EVENT" (first v)) (save-id! (nth v 2) socket-id))
                       (when (= "NOTICE" (first v)) (pprint {:notice v :from socket-id}))
                       (recur))))
                 (cl-format true "Connection to ~S ended, reason: ~S, on disconnect ~S" socket-id (<! close-status) on-disconnect)
